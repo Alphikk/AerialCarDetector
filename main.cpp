@@ -7,8 +7,10 @@
     void file_iterator(DCSP_CORE *&p) {
         std::filesystem::path current_path = std::filesystem::current_path();
         std::filesystem::path imgs_path = current_path / "images";
-        for (auto &i: std::filesystem::directory_iterator(imgs_path)) {
-            if (i.path().extension() == ".jpg" || i.path().extension() == ".png" || i.path().extension() == ".jpeg") {
+        for (auto &i: std::filesystem::directory_iterator(imgs_path))
+        {
+            if (i.path().extension() == ".jpg" || i.path().extension() == ".png" || i.path().extension() == ".jpeg")
+            {
                 std::string img_path = i.path().string();
                 cv::Mat img = cv::imread(img_path);
                 std::vector<DCSP_RESULT> res;
@@ -22,7 +24,7 @@
 
                     float confidence = floor(100 * re.confidence) / 100;
                     std::cout << std::fixed << std::setprecision(2);
-                    std::string label = p->classes[re.classId] + " " +
+                    std::string label = p->classes_[re.classId] + " " +
                                         std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
 
                     cv::rectangle(
@@ -90,7 +92,7 @@
             names.push_back(name);
         }
 
-        p->classes = names;
+        p->classes_ = names;
         return 0;
     }
 
@@ -99,15 +101,10 @@
         DCSP_CORE *yoloDetector = new DCSP_CORE;
         std::string model_path = "yolov8n.onnx";
         read_coco_yaml(yoloDetector);
-    #ifdef USE_CUDA
-        // GPU FP32 inference
-        DCSP_INIT_PARAM params{ model_path, YOLO_ORIGIN_V8, {640, 640},  0.1, 0.5, true };
-        // GPU FP16 inference
-        // DCSP_INIT_PARAM params{ model_path, YOLO_ORIGIN_V8_HALF, {640, 640},  0.1, 0.5, true };
-    #else
+
         // CPU inference
         DCSP_INIT_PARAM params{model_path, YOLO_ORIGIN_V8, {640, 640}, 0.1, 0.5, false};
-    #endif
+
         yoloDetector->CreateSession(params);
         file_iterator(yoloDetector);
     }
