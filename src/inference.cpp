@@ -12,15 +12,6 @@
         delete session_;
     }
 
-    #ifdef USE_CUDA
-    namespace Ort
-    {
-        template<>
-        struct TypeToTensorType<half> { static constexpr ONNXTensorElementDataType type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16; };
-    }
-    #endif
-
-
     template<typename T>
     char *BlobFromImage(cv::Mat &iImg, T &iBlob) {
         int channels = iImg.channels();
