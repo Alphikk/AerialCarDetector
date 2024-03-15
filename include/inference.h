@@ -31,7 +31,6 @@
         std::vector<int> imgSize = {640, 640};
         float RectConfidenceThreshold = 0.6;
         float iouThreshold = 0.5;
-        bool CudaEnable = false;
         int LogSeverityLevel = 3;
         int IntraOpNumThreads = 1;
     } DCSP_INIT_PARAM;
@@ -58,21 +57,22 @@
         char *WarmUpSession();
 
         template<typename N>
-        char *TensorProcess(clock_t &starttime_1, cv::Mat &iImg, N &blob, std::vector<int64_t> &inputNodeDims,
+        char *TensorProcess(cv::Mat &iImg,
+                            N &blob,
+                            std::vector<int64_t> &inputNodeDims,
                             std::vector<DCSP_RESULT> &oResult);
 
-        std::vector<std::string> classes{};
+        std::vector<std::string> classes_{};
 
     private:
-        Ort::Env env;
-        Ort::Session *session;
-        bool cudaEnable;
-        Ort::RunOptions options;
-        std::vector<const char *> inputNodeNames;
-        std::vector<const char *> outputNodeNames;
+        Ort::Env env_;
+        Ort::Session *session_;
+        Ort::RunOptions options_;
+        std::vector<const char *> inputNodeNames_;
+        std::vector<const char *> outputNodeNames_;
 
-        MODEL_TYPE modelType;
-        std::vector<int> imgSize;
-        float rectConfidenceThreshold;
-        float iouThreshold;
+        MODEL_TYPE modelType_;
+        std::vector<int> imgSize_;
+        float rectConfidenceThreshold_;
+        float iouThreshold_;
     };

@@ -9,7 +9,7 @@
 
 
     DCSP_CORE::~DCSP_CORE() {
-        delete session;
+        delete session_;
     }
 
     #ifdef USE_CUDA
@@ -60,49 +60,33 @@
             return Ret;
         }
         try {
-            rectConfidenceThreshold = iParams.RectConfidenceThreshold;
-            iouThreshold = iParams.iouThreshold;
-            imgSize = iParams.imgSize;
-            modelType = iParams.ModelType;
-            env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "Yolo");
+            rectConfidenceThreshold_ = iParams.RectConfidenceThreshold;
+            iouThreshold_ = iParams.iouThreshold;
+            imgSize_ = iParams.imgSize;
+            modelType_ = iParams.ModelType;
+            env_ = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "Yolo");
             Ort::SessionOptions sessionOption;
-            if (iParams.CudaEnable) {
-                cudaEnable = iParams.CudaEnable;
-                OrtCUDAProviderOptions cudaOption;
-                cudaOption.device_id = 0;
-                sessionOption.AppendExecutionProvider_CUDA(cudaOption);
-            }
             sessionOption.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
             sessionOption.SetIntraOpNumThreads(iParams.IntraOpNumThreads);
             sessionOption.SetLogSeverityLevel(iParams.LogSeverityLevel);
-
-    #ifdef _WIN32
-            int ModelPathSize = MultiByteToWideChar(CP_UTF8, 0, iParams.ModelPath.c_str(), static_cast<int>(iParams.ModelPath.length()), nullptr, 0);
-            wchar_t* wide_cstr = new wchar_t[ModelPathSize + 1];
-            MultiByteToWideChar(CP_UTF8, 0, iParams.ModelPath.c_str(), static_cast<int>(iParams.ModelPath.length()), wide_cstr, ModelPathSize);
-            wide_cstr[ModelPathSize] = L'\0';
-            const wchar_t* modelPath = wide_cstr;
-    #else
-            const char *modelPath = iParams.ModelPath.c_str();
-    #endif // _WIN32
-
-            session = new Ort::Session(env, modelPath, sessionOption);
+            const char * modelPath = iParams.ModelPath.c_str();
+            session_ = new Ort::Session(env_, modelPath, sessionOption);
             Ort::AllocatorWithDefaultOptions allocator;
-            size_t inputNodesNum = session->GetInputCount();
+            size_t inputNodesNum = session_->GetInputCount();
             for (size_t i = 0; i < inputNodesNum; i++) {
-                Ort::AllocatedStringPtr input_node_name = session->GetInputNameAllocated(i, allocator);
+                Ort::AllocatedStringPtr input_node_name = session_->GetInputNameAllocated(i, allocator);
                 char *temp_buf = new char[50];
                 strcpy(temp_buf, input_node_name.get());
-                inputNodeNames.push_back(temp_buf);
+                inputNodeNames_.push_back(temp_buf);
             }
-            size_t OutputNodesNum = session->GetOutputCount();
+            size_t OutputNodesNum = session_->GetOutputCount();
             for (size_t i = 0; i < OutputNodesNum; i++) {
-                Ort::AllocatedStringPtr output_node_name = session->GetOutputNameAllocated(i, allocator);
+                Ort::AllocatedStringPtr output_node_name = session_->GetOutputNameAllocated(i, allocator);
                 char *temp_buf = new char[10];
                 strcpy(temp_buf, output_node_name.get());
-                outputNodeNames.push_back(temp_buf);
+                outputNodeNames_.push_back(temp_buf);
             }
-            options = Ort::RunOptions{nullptr};
+            options_ = Ort::RunOptions{nullptr};
             WarmUpSession();
             return RET_OK;
         }
@@ -120,53 +104,49 @@
     }
 
 
-    char *DCSP_CORE::RunSession(cv::Mat &iImg, std::vector<DCSP_RESULT> &oResult) {
-    #ifdef benchmark
-        clock_t starttime_1 = clock();
-    #endif // benchmark
-
-        char *Ret = RET_OK;
-        cv::Mat processedImg;
-        PostProcess(iImg, imgSize, processedImg);
-        if (modelType < 4) {
-            float *blob = new float[processedImg.total() * 3];
-            BlobFromImage(processedImg, blob);
-            std::vector<int64_t> inputNodeDims = {1, 3, imgSize.at(0), imgSize.at(1)};
-            TensorProcess(starttime_1, iImg, blob, inputNodeDims, oResult);
-        } else {
-    #ifdef USE_CUDA
-            half* blob = new half[processedImg.total() * 3];
-            BlobFromImage(processedImg, blob);
-            std::vector<int64_t> inputNodeDims = { 1,3,imgSize.at(0),imgSize.at(1) };
-            TensorProcess(starttime_1, iImg, blob, inputNodeDims, oResult);
-    #endif
-        }
-
-        return Ret;
+char *DCSP_CORE::RunSession(cv::Mat &iImg, std::vector<DCSP_RESULT> &oResult)
+{
+    char *Ret = RET_OK;
+    cv::Mat processedImg;
+    PostProcess(iImg, imgSize_, processedImg);
+    if (modelType_ < 4)
+    {
+        float *blob = new float[processedImg.total() * 3];
+        BlobFromImage(processedImg, blob);
+        std::vector<int64_t> inputNodeDims = {1, 3, imgSize_.at(0), imgSize_.at(1)};
+        TensorProcess(iImg, blob, inputNodeDims, oResult);
     }
 
+    return Ret;
+}
 
-    template<typename N>
-    char *DCSP_CORE::TensorProcess(clock_t &starttime_1, cv::Mat &iImg, N &blob, std::vector<int64_t> &inputNodeDims,
-                                   std::vector<DCSP_RESULT> &oResult) {
-        Ort::Value inputTensor = Ort::Value::CreateTensor<typename std::remove_pointer<N>::type>(
-                Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU), blob, 3 * imgSize.at(0) * imgSize.at(1),
-                inputNodeDims.data(), inputNodeDims.size());
-    #ifdef benchmark
-        clock_t starttime_2 = clock();
-    #endif // benchmark
-        auto outputTensor = session->Run(options, inputNodeNames.data(), &inputTensor, 1, outputNodeNames.data(),
-                                         outputNodeNames.size());
-    #ifdef benchmark
-        clock_t starttime_3 = clock();
-    #endif // benchmark
+
+template<typename N>
+char *DCSP_CORE::TensorProcess( cv::Mat &iImg,
+                                N &blob,
+                                std::vector<int64_t> &inputNodeDims,
+                                std::vector<DCSP_RESULT> &oResult )
+{
+    Ort::Value inputTensor = Ort::Value::CreateTensor<typename std::remove_pointer<N>::type>(
+                Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU),
+                blob,
+                3 * imgSize_.at(0) * imgSize_.at(1),
+                inputNodeDims.data(),
+                inputNodeDims.size());
+
+    auto outputTensor = session_->Run(options_,
+                                     inputNodeNames_.data(),
+                                     &inputTensor,
+                                     1,
+                                     outputNodeNames_.data(),
+                                     outputNodeNames_.size());
 
         Ort::TypeInfo typeInfo = outputTensor.front().GetTypeInfo();
         auto tensor_info = typeInfo.GetTensorTypeAndShapeInfo();
         std::vector<int64_t> outputNodeDims = tensor_info.GetShape();
         auto output = outputTensor.front().GetTensorMutableData<typename std::remove_pointer<N>::type>();
         delete blob;
-        switch (modelType) {
+        switch (modelType_) {
             case 1://V8_ORIGIN_FP32
             case 4://V8_ORIGIN_FP16
             {
@@ -177,7 +157,7 @@
                 std::vector<cv::Rect> boxes;
 
                 cv::Mat rawData;
-                if (modelType == 1) {
+                if (modelType_ == 1) {
                     // FP32
                     rawData = cv::Mat(signalResultNum, strideNum, CV_32F, output);
                 } else {
@@ -192,11 +172,11 @@
                 float y_factor = iImg.rows / 640.;
                 for (int i = 0; i < strideNum; ++i) {
                     float *classesScores = data + 4;
-                    cv::Mat scores(1, this->classes.size(), CV_32FC1, classesScores);
+                    cv::Mat scores(1, this->classes_.size(), CV_32FC1, classesScores);
                     cv::Point class_id;
                     double maxClassScore;
                     cv::minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
-                    if (maxClassScore > rectConfidenceThreshold) {
+                    if (maxClassScore > rectConfidenceThreshold_) {
                         confidences.push_back(maxClassScore);
                         class_ids.push_back(class_id.x);
 
@@ -217,9 +197,10 @@
                 }
 
                 std::vector<int> nmsResult;
-                cv::dnn::NMSBoxes(boxes, confidences, rectConfidenceThreshold, iouThreshold, nmsResult);
+                cv::dnn::NMSBoxes(boxes, confidences, rectConfidenceThreshold_, iouThreshold_, nmsResult);
 
-                for (int i = 0; i < nmsResult.size(); ++i) {
+                for (int i = 0; i < nmsResult.size(); ++i)
+                {
                     int idx = nmsResult[i];
                     DCSP_RESULT result;
                     result.classId = class_ids[idx];
@@ -227,22 +208,6 @@
                     result.box = boxes[idx];
                     oResult.push_back(result);
                 }
-
-
-    #ifdef benchmark
-                clock_t starttime_4 = clock();
-                double pre_process_time = (double) (starttime_2 - starttime_1) / CLOCKS_PER_SEC * 1000;
-                double process_time = (double) (starttime_3 - starttime_2) / CLOCKS_PER_SEC * 1000;
-                double post_process_time = (double) (starttime_4 - starttime_3) / CLOCKS_PER_SEC * 1000;
-                if (cudaEnable) {
-                    std::cout << "[DCSP_ONNX(CUDA)]: " << pre_process_time << "ms pre-process, " << process_time
-                              << "ms inference, " << post_process_time << "ms post-process." << std::endl;
-                } else {
-                    std::cout << "[DCSP_ONNX(CPU)]: " << pre_process_time << "ms pre-process, " << process_time
-                              << "ms inference, " << post_process_time << "ms post-process." << std::endl;
-                }
-    #endif // benchmark
-
                 break;
             }
         }
@@ -250,41 +215,26 @@
     }
 
 
-    char *DCSP_CORE::WarmUpSession() {
-        clock_t starttime_1 = clock();
-        cv::Mat iImg = cv::Mat(cv::Size(imgSize.at(0), imgSize.at(1)), CV_8UC3);
+char *DCSP_CORE::WarmUpSession()
+{
+        cv::Mat iImg = cv::Mat(cv::Size(imgSize_.at(0), imgSize_.at(1)), CV_8UC3);
         cv::Mat processedImg;
-        PostProcess(iImg, imgSize, processedImg);
-        if (modelType < 4) {
+        PostProcess(iImg, imgSize_, processedImg);
+        if (modelType_ < 4)
+        {
             float *blob = new float[iImg.total() * 3];
             BlobFromImage(processedImg, blob);
-            std::vector<int64_t> YOLO_input_node_dims = {1, 3, imgSize.at(0), imgSize.at(1)};
+            std::vector<int64_t> YOLO_input_node_dims = {1, 3, imgSize_.at(0), imgSize_.at(1)};
             Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-                    Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU), blob, 3 * imgSize.at(0) * imgSize.at(1),
-                    YOLO_input_node_dims.data(), YOLO_input_node_dims.size());
-            auto output_tensors = session->Run(options, inputNodeNames.data(), &input_tensor, 1, outputNodeNames.data(),
-                                               outputNodeNames.size());
+                    Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU),
+                    blob,
+                    3 * imgSize_.at(0) * imgSize_.at(1),
+                    YOLO_input_node_dims.data(),
+                    YOLO_input_node_dims.size());
+
+            auto output_tensors = session_->Run(options_, inputNodeNames_.data(), &input_tensor, 1, outputNodeNames_.data(),
+                                               outputNodeNames_.size());
             delete[] blob;
-            clock_t starttime_4 = clock();
-            double post_process_time = (double) (starttime_4 - starttime_1) / CLOCKS_PER_SEC * 1000;
-            if (cudaEnable) {
-                std::cout << "[DCSP_ONNX(CUDA)]: " << "Cuda warm-up cost " << post_process_time << " ms. " << std::endl;
-            }
-        } else {
-    #ifdef USE_CUDA
-            half* blob = new half[iImg.total() * 3];
-            BlobFromImage(processedImg, blob);
-            std::vector<int64_t> YOLO_input_node_dims = { 1,3,imgSize.at(0),imgSize.at(1) };
-            Ort::Value input_tensor = Ort::Value::CreateTensor<half>(Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU), blob, 3 * imgSize.at(0) * imgSize.at(1), YOLO_input_node_dims.data(), YOLO_input_node_dims.size());
-            auto output_tensors = session->Run(options, inputNodeNames.data(), &input_tensor, 1, outputNodeNames.data(), outputNodeNames.size());
-            delete[] blob;
-            clock_t starttime_4 = clock();
-            double post_process_time = (double)(starttime_4 - starttime_1) / CLOCKS_PER_SEC * 1000;
-            if (cudaEnable)
-            {
-                std::cout << "[DCSP_ONNX(CUDA)]: " << "Cuda warm-up cost " << post_process_time << " ms. " << std::endl;
-            }
-    #endif
         }
         return RET_OK;
     }
